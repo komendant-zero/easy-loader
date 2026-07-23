@@ -1,2 +1,8 @@
 yt-dlp>=2024
 PySide6>=6.6
+certifi
+requests
+urllib3
+brotli
+mutagen
+pycryptodomex
