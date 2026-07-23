@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "easy-loader"
+version = "1.0.0"
+description = "Minimal desktop app for downloading YouTube videos, audio and thumbnails"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "atack" },
+]
+
+dependencies = [
+    "PySide6>=6.6",
+    "yt-dlp>=2024",
+]
+
+[project.urls]
+Repository = "https://github.com/atack/easy-loader"
+
+[tool.setuptools.packages.find]
+where = ["src"]
