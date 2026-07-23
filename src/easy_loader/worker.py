@@ -308,6 +308,7 @@ class DownloadWorker(QThread):
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                             check=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW,
                         )
                     else:
                         subprocess.run(
@@ -319,6 +320,7 @@ class DownloadWorker(QThread):
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                             check=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW,
                         )
 
                     if os.path.exists(dl_path):

@@ -9,7 +9,8 @@ missing = [p for p in REQUIRED if importlib.util.find_spec(p) is None]
 if missing:
     print(f"Installing: {', '.join(missing)}")
     subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", *missing, "--quiet", "--no-warn-script-location"]
+        [sys.executable, "-m", "pip", "install", *missing, "--quiet", "--no-warn-script-location"],
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
 
 from src.easy_loader.__main__ import main
