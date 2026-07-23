@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 
-from .worker import DownloadWorker, InfoWorker
+from .worker import DownloadWorker, InfoWorker, VIDEO_QUALITY_MAP
 
 log = logging.getLogger("ytdl")
 
@@ -31,10 +31,15 @@ AUDIO_CODECS = [
     "MP3 (libmp3lame)", "AAC (aac)", "OGG (libvorbis)",
     "FLAC (flac)", "Opus (libopus)",
 ]
-VIDEO_CODECS = [
-    "MP4 (H.264)", "MKV (H.265)", "WEBM (VP9)", "WEBM (AV1)",
-    "MOV", "AVI", "FLV", "WMV",
-]
+VIDEO_FORMATS: dict[str, tuple[str, str]] = {
+    "MP4 (H.264)": ("bestvideo[vcodec^=avc1]+bestaudio/best", "mp4"),
+    "MKV (H.265)": ("bestvideo[vcodec^=hevc]+bestaudio/best", "mkv"),
+    "WEBM (VP9)": ("bestvideo[vcodec^=vp9]+bestaudio/best", "webm"),
+    "WEBM (AV1)": ("bestvideo[vcodec^=av01]+bestaudio/best", "webm"),
+    "MP4 (best)": ("bestvideo+bestaudio/best", "mp4"),
+    "MKV (best)": ("bestvideo+bestaudio/best", "mkv"),
+}
+VIDEO_CODECS = list(VIDEO_FORMATS.keys())
 
 class QualityPopup(QFrame):
     picked = Signal(str)
@@ -286,18 +291,9 @@ class MainWindow(QMainWindow):
             "FLAC (flac)": "flac",
             "Opus (libopus)": "libopus",
         }
-        video_map = {
-            "MP4 (H.264)": "mp4",
-            "MKV (H.265)": "mkv",
-            "WEBM (VP9)": "webm",
-            "WEBM (AV1)": "webm",
-            "MOV": "mov",
-            "AVI": "avi",
-            "FLV": "flv",
-            "WMV": "wmv",
-        }
         if self._dtype == "video":
-            self._vcodec = video_map.get(v, "mp4")
+            fmt_spec, ext = VIDEO_FORMATS.get(v, ("bestvideo+bestaudio/best", "mp4"))
+            self._vcodec = f"{fmt_spec}|{ext}"
         else:
             self._acodec = audio_map.get(v, "libmp3lame")
         self._codec_btn.setText(v)
@@ -328,7 +324,20 @@ class MainWindow(QMainWindow):
         self._st.setText("Подготовка…")
         self._st.setStyleSheet("color:#6a6a7e; font-size:12px;")
 
-        self._worker = DownloadWorker(url, sd, self._dtype, q, self._acodec, self._vcodec)
+        vfmt = self._vcodec
+        if self._dtype == "video" and "|" in vfmt:
+            parts = vfmt.split("|", 1)
+            base_fmt = parts[0]
+            ext = parts[1]
+            qfmt = VIDEO_QUALITY_MAP.get(q, "bestvideo+bestaudio/best")
+            if "[height" in qfmt:
+                vfilter = base_fmt.replace("bestvideo", "", 1).replace("+bestaudio/best", "", 1)
+                combined = qfmt.replace("bestvideo", f"bestvideo{vfilter}", 1)
+            else:
+                combined = base_fmt
+            vfmt = f"{combined}|{ext}"
+
+        self._worker = DownloadWorker(url, sd, self._dtype, q, self._acodec, vfmt)
         self._worker.progress.connect(self._on_p)
         self._worker.finished.connect(self._on_f)
         self._worker.start()

@@ -356,13 +356,17 @@ class DownloadWorker(QThread):
         info = self._extract_info()
         title: str = info.get("title", "video")
         safe = self._sanitize(title)
-        ext = self.vcodec
+
+        vfmt = self.vcodec
+        if "|" in vfmt:
+            fmt, ext = vfmt.split("|", 1)
+        else:
+            fmt = VIDEO_QUALITY_MAP.get(self.quality, "bestvideo+bestaudio/best")
+            ext = vfmt
         final = self._unique_path(safe, ext)
 
         os.makedirs(TEMP_DIR, exist_ok=True)
         tmp_tmpl = os.path.join(TEMP_DIR, f"yt_{uuid.uuid4().hex}.%(ext)s")
-
-        fmt = VIDEO_QUALITY_MAP.get(self.quality, "bestvideo+bestaudio/best")
         opts = self._ydl_opts(
             format=fmt,
             outtmpl=tmp_tmpl,
