@@ -128,8 +128,11 @@ class MainWindow(QMainWindow):
         h.addWidget(self._br)
         c3.addLayout(h)
 
-        c4 = box(r)
-
+        self._codec_frame = QFrame()
+        self._codec_frame.setObjectName("bx")
+        cf_lo = QVBoxLayout(self._codec_frame)
+        cf_lo.setContentsMargins(14, 12, 14, 12)
+        cf_lo.setSpacing(10)
         codec_row = QHBoxLayout()
         codec_row.setSpacing(6)
         self._codec_btn = QPushButton("MP3 (libmp3lame)")
@@ -143,7 +146,10 @@ class MainWindow(QMainWindow):
         self._dl.setCursor(Qt.PointingHandCursor)
         self._dl.clicked.connect(self._go)
         codec_row.addWidget(self._dl)
-        c4.addLayout(codec_row)
+        cf_lo.addLayout(codec_row)
+        r.addWidget(self._codec_frame)
+
+        c4 = box(r)
 
         self._bar = QProgressBar()
         self._bar.setValue(0)
@@ -228,6 +234,8 @@ class MainWindow(QMainWindow):
             on = key == k
             b.setChecked(on)
             b.setStyleSheet('QPushButton#mo { background:#3b82f6; color:#fff; border-color:#3b82f6; }' if on else '')
+
+        self._codec_frame.setVisible(k == "audio")
 
         if k == "thumb":
             self._q.setText("—")
