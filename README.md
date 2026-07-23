@@ -1,4 +1,4 @@
-# easy-loader
+# easy-loader ![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white)
 
 Минималистичный десктопный загрузчик YouTube на PySide6 и yt-dlp.
 
