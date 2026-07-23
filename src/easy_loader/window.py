@@ -186,6 +186,7 @@ class MainWindow(QMainWindow):
     def _on_url(self, text: str) -> None:
         if self._iworker and self._iworker.isRunning():
             self._iworker.terminate()
+            self._iworker.wait()
 
         m = YT_RE.search(text)
         if not m:
@@ -317,4 +318,10 @@ class MainWindow(QMainWindow):
                 os.remove(self._thumb_path)
             except Exception:
                 pass
+        if self._iworker and self._iworker.isRunning():
+            self._iworker.terminate()
+            self._iworker.wait()
+        if self._worker and self._worker.isRunning():
+            self._worker.terminate()
+            self._worker.wait()
         super().closeEvent(ev)
