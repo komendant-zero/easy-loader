@@ -25,13 +25,11 @@ YT_RE = re.compile(
     r"(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([\w-]{11})"
 )
 
-VIDEO_ITEMS = ["Лучшее", "2160p", "1440p", "1080p", "720p", "480p", "360p"]
-AUDIO_ITEMS = ["320k", "256k", "192k", "128k", "96k", "64k"]
+VIDEO_ITEMS = ["Лучшее", "2160p (4K)", "1440p (2K)", "1080p", "720p", "480p", "360p"]
+AUDIO_ITEMS = ["320 kbps", "256 kbps", "192 kbps", "128 kbps", "96 kbps", "64 kbps"]
 AUDIO_CODECS = [
     "MP3 (libmp3lame)", "AAC (aac)", "OGG (libvorbis)",
-    "FLAC (flac)", "Opus (libopus)", "WMA (wmav2)",
-    "AC3 (ac3)", "E-AC3 (eac3)", "ALAC (alac)",
-    "GSM (libgsm)", "Speex (libspeex)", "WavPack (wavpack)", "TTA (tta)",
+    "FLAC (flac)", "Opus (libopus)",
 ]
 
 class QualityPopup(QFrame):
@@ -268,9 +266,6 @@ class MainWindow(QMainWindow):
             "Opus (libopus)": "libopus",
         }
         self._acodec = codec_map.get(v, "libmp3lame")
-        # для flac/opus меняем расширение
-        ext_map = {"flac": "flac", "libopus": "opus"}
-        ext = ext_map.get(self._acodec, "mp3")
         self._codec_btn.setText(v)
 
     def _brws(self) -> None:
