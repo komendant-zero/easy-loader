@@ -121,6 +121,7 @@ class DownloadWorker(QThread):
         download_type: str,
         quality: str,
         codec: str = "libmp3lame",
+        vcodec: str = "mp4",
     ) -> None:
         super().__init__()
         self.url = url
@@ -128,6 +129,7 @@ class DownloadWorker(QThread):
         self.download_type = download_type
         self.quality = quality
         self.codec = codec
+        self.vcodec = vcodec
 
     def run(self) -> None:
         try:
@@ -352,7 +354,8 @@ class DownloadWorker(QThread):
         info = self._extract_info()
         title: str = info.get("title", "video")
         safe = self._sanitize(title)
-        final = self._unique_path(safe, "mp4")
+        ext = self.vcodec
+        final = self._unique_path(safe, ext)
 
         os.makedirs(TEMP_DIR, exist_ok=True)
         tmp_tmpl = os.path.join(TEMP_DIR, f"yt_{uuid.uuid4().hex}.%(ext)s")
@@ -362,14 +365,14 @@ class DownloadWorker(QThread):
             format=fmt,
             outtmpl=tmp_tmpl,
             progress_hooks=[self._progress_hook],
-            merge_output_format="mp4",
+            merge_output_format=ext,
         )
 
         with yt_dlp.YoutubeDL(opts) as ydl:
             info2 = ydl.extract_info(self.url, download=True)
             dl_path: str = ydl.prepare_filename(info2)
 
-        src = dl_path if dl_path.endswith(".mp4") else dl_path.rsplit(".", 1)[0] + ".mp4"
+        src = dl_path if dl_path.endswith(f".{ext}") else dl_path.rsplit(".", 1)[0] + f".{ext}"
         if not os.path.exists(src):
             src = dl_path
         if src != final:

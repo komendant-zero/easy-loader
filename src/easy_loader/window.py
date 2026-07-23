@@ -31,6 +31,10 @@ AUDIO_CODECS = [
     "MP3 (libmp3lame)", "AAC (aac)", "OGG (libvorbis)",
     "FLAC (flac)", "Opus (libopus)",
 ]
+VIDEO_CODECS = [
+    "MP4 (H.264)", "MKV (H.265)", "WEBM (VP9)", "WEBM (AV1)",
+    "MOV", "AVI", "FLV", "WMV",
+]
 
 class QualityPopup(QFrame):
     picked = Signal(str)
@@ -79,6 +83,7 @@ class MainWindow(QMainWindow):
         self._popup = QualityPopup(AUDIO_ITEMS)
         self._popup.picked.connect(self._set_q)
         self._acodec = "libmp3lame"
+        self._vcodec = "mp4"
         self._codec_popup = QualityPopup(AUDIO_CODECS)
         self._codec_popup.picked.connect(self._set_codec)
 
@@ -235,7 +240,14 @@ class MainWindow(QMainWindow):
             b.setChecked(on)
             b.setStyleSheet('QPushButton#mo { background:#3b82f6; color:#fff; border-color:#3b82f6; }' if on else '')
 
-        self._codec_frame.setVisible(k == "audio")
+        if k == "thumb":
+            self._codec_frame.setVisible(False)
+        else:
+            self._codec_frame.setVisible(True)
+            items = AUDIO_CODECS if k == "audio" else VIDEO_CODECS
+            self._codec_popup = QualityPopup(items)
+            self._codec_popup.picked.connect(self._set_codec)
+            self._codec_btn.setText(self._acodec if k == "audio" else self._vcodec)
 
         if k == "thumb":
             self._q.setText("—")
@@ -267,14 +279,27 @@ class MainWindow(QMainWindow):
         self._codec_popup.show()
 
     def _set_codec(self, v: str) -> None:
-        codec_map = {
+        audio_map = {
             "MP3 (libmp3lame)": "libmp3lame",
             "AAC (aac)": "aac",
             "OGG (libvorbis)": "libvorbis",
             "FLAC (flac)": "flac",
             "Opus (libopus)": "libopus",
         }
-        self._acodec = codec_map.get(v, "libmp3lame")
+        video_map = {
+            "MP4 (H.264)": "mp4",
+            "MKV (H.265)": "mkv",
+            "WEBM (VP9)": "webm",
+            "WEBM (AV1)": "webm",
+            "MOV": "mov",
+            "AVI": "avi",
+            "FLV": "flv",
+            "WMV": "wmv",
+        }
+        if self._dtype == "video":
+            self._vcodec = video_map.get(v, "mp4")
+        else:
+            self._acodec = audio_map.get(v, "libmp3lame")
         self._codec_btn.setText(v)
 
     def _brws(self) -> None:
@@ -303,7 +328,7 @@ class MainWindow(QMainWindow):
         self._st.setText("Подготовка…")
         self._st.setStyleSheet("color:#6a6a7e; font-size:12px;")
 
-        self._worker = DownloadWorker(url, sd, self._dtype, q, self._acodec)
+        self._worker = DownloadWorker(url, sd, self._dtype, q, self._acodec, self._vcodec)
         self._worker.progress.connect(self._on_p)
         self._worker.finished.connect(self._on_f)
         self._worker.start()
