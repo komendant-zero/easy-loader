@@ -112,7 +112,7 @@ CODEC_EXT_MAP: dict[str, str] = {
 
 class DownloadWorker(QThread):
     progress = Signal(str, float)
-    finished = Signal(str, bool)
+    finished = Signal(str, bool, str)
 
     def __init__(
         self,
@@ -122,6 +122,8 @@ class DownloadWorker(QThread):
         quality: str,
         codec: str = "libmp3lame",
         vcodec: str = "mp4",
+        custom_title: str | None = None,
+        custom_author: str | None = None,
     ) -> None:
         super().__init__()
         self.url = url
@@ -130,6 +132,8 @@ class DownloadWorker(QThread):
         self.quality = quality
         self.codec = codec
         self.vcodec = vcodec
+        self.custom_title = custom_title
+        self.custom_author = custom_author
 
     def run(self) -> None:
         try:
@@ -140,7 +144,7 @@ class DownloadWorker(QThread):
             }[self.download_type]()
         except Exception as exc:
             log.error("Download failed: %s", exc)
-            self.finished.emit(str(exc), False)
+            self.finished.emit(str(exc), False, "")
 
     # ── yt-dlp helpers ──────────────────────────────────────
 
@@ -234,7 +238,7 @@ class DownloadWorker(QThread):
         size = os.path.getsize(path)
         self.progress.emit("Готово", 100)
         self.finished.emit(
-            f"Превью: {os.path.basename(path)} ({_fmt_size(size)})", True
+            f"Превью: {os.path.basename(path)} ({_fmt_size(size)})", True, path
         )
 
     # ── Audio ────────────────────────────────────────────────
@@ -245,8 +249,12 @@ class DownloadWorker(QThread):
         self.progress.emit("Получаю информацию…", 5)
         info = self._extract_info()
         title: str = info.get("title", "audio")
+        
+        c_title = (self.custom_title or "").strip()
+        c_author = (self.custom_author or "").strip()
+        
         thumb_url: str | None = info.get("thumbnail")
-        safe = self._sanitize(title)
+        safe = self._sanitize(c_title if c_title else title)
         ext = CODEC_EXT_MAP.get(self.codec, "mp3")
         final = self._unique_path(safe, ext)
 
@@ -291,6 +299,12 @@ class DownloadWorker(QThread):
                     if not _ffmpeg_path:
                         raise ValueError("ffmpeg не найден — конвертация аудио недоступна")
 
+                    meta_args = []
+                    if c_title:
+                        meta_args.extend(["-metadata", f"title={c_title}"])
+                    if c_author:
+                        meta_args.extend(["-metadata", f"artist={c_author}"])
+
                     if thumb_path and os.path.exists(thumb_path):
                         cmd = [
                             _ffmpeg_path, "-y",
@@ -299,7 +313,7 @@ class DownloadWorker(QThread):
                             "-c:v", "mjpeg", "-q:v", "5",
                             "-map", "0:a", "-map", "1:v",
                             "-id3v2_version", "3",
-                        ]
+                        ] + meta_args
                         if self.codec == "libmp3lame":
                             cmd.insert(4, "-f")
                             cmd.insert(5, "mp3")
@@ -315,6 +329,7 @@ class DownloadWorker(QThread):
                             [
                                 _ffmpeg_path, "-y", "-i", dl_path,
                                 "-vn", "-c:a", self.codec, "-ab", f"{abr}k",
+                            ] + meta_args + [
                                 final,
                             ],
                             stdout=subprocess.DEVNULL,
@@ -331,6 +346,7 @@ class DownloadWorker(QThread):
                     self.finished.emit(
                         f"Аудио: {os.path.basename(final)} ({_fmt_size(size)})",
                         True,
+                        final,
                     )
                     return
 
@@ -393,7 +409,7 @@ class DownloadWorker(QThread):
         size = os.path.getsize(final)
         self.progress.emit("Готово", 100)
         self.finished.emit(
-            f"Видео: {os.path.basename(final)} ({_fmt_size(size)})", True
+            f"Видео: {os.path.basename(final)} ({_fmt_size(size)})", True, final
         )
 
 

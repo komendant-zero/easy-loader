@@ -9,7 +9,8 @@ import stat
 import platform
 from pathlib import Path
 
-BIN_DIR = Path(__file__).resolve().parent  # рядом с bootstrap.py
+BIN_DIR = Path.home() / ".easy_loader"
+BIN_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def ensure_ffmpeg() -> str | None:

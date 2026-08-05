@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import os
+import sys
 import re
 import uuid
 import logging
 import urllib.request as urlreq
 from pathlib import Path
 
+def resource_path(relative_path: str) -> str:
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.join(base_path, relative_path)
+
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLineEdit, QLabel, QProgressBar,
-    QFileDialog, QFrame,
+    QFileDialog, QFrame, QScrollArea, QSizePolicy
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtGui import QPixmap, QIcon
 
 from .worker import DownloadWorker, InfoWorker, VIDEO_QUALITY_MAP
 
@@ -25,7 +33,7 @@ YT_RE = re.compile(
     r"(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([\w-]{11})"
 )
 
-VIDEO_ITEMS = ["Лучшее", "2160p (4K)", "1440p (2K)", "1080p", "720p", "480p", "360p"]
+VIDEO_ITEMS = ["2160p (4K)", "1440p (2K)", "1080p", "720p", "480p", "360p"]
 AUDIO_ITEMS = ["320 kbps", "256 kbps", "192 kbps", "128 kbps", "96 kbps", "64 kbps"]
 AUDIO_CODECS = [
     "MP3 (libmp3lame)", "AAC (aac)", "OGG (libvorbis)",
@@ -36,77 +44,121 @@ VIDEO_FORMATS: dict[str, tuple[str, str]] = {
     "MKV (H.265)": ("bestvideo[vcodec^=hevc]+bestaudio/best", "mkv"),
     "WEBM (VP9)": ("bestvideo[vcodec^=vp9]+bestaudio/best", "webm"),
     "WEBM (AV1)": ("bestvideo[vcodec^=av01]+bestaudio/best", "webm"),
-    "MP4 (best)": ("bestvideo+bestaudio/best", "mp4"),
-    "MKV (best)": ("bestvideo+bestaudio/best", "mkv"),
 }
 VIDEO_CODECS = list(VIDEO_FORMATS.keys())
 
-class QualityPopup(QFrame):
+
+class PreviewLabel(QLabel):
+    def __init__(self):
+        super().__init__()
+        self.setAlignment(Qt.AlignCenter)
+        self.setMinimumHeight(210)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._pix = None
+
+    def setPixmap(self, p: QPixmap) -> None:
+        self._pix = p
+        self._update_pixmap()
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        self._update_pixmap()
+
+    def _update_pixmap(self) -> None:
+        if self._pix and not self._pix.isNull():
+            scaled = self._pix.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            super().setPixmap(scaled)
+
+
+class ChipGroup(QWidget):
     picked = Signal(str)
 
-    def __init__(self, items: list[str]) -> None:
+    def __init__(self, title: str, items: list[str], columns: int = 3) -> None:
         super().__init__()
-        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
-        self.setObjectName("popup")
-        lo = QVBoxLayout(self)
-        lo.setContentsMargins(4, 4, 4, 4)
-        lo.setSpacing(2)
-        for v in items:
-            b = QPushButton(v)
-            b.setObjectName("pi")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        
+        lbl = QLabel(title)
+        lbl.setObjectName("grouptitle")
+        layout.addWidget(lbl)
+        
+        w = QWidget()
+        self.grid = QGridLayout(w)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(8)
+        layout.addWidget(w)
+        
+        self.buttons = {}
+        for i, text in enumerate(items):
+            b = QPushButton(text)
+            b.setObjectName("chip")
+            b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda _=False, x=v: self._sel(x))
-            lo.addWidget(b)
-
-    def _sel(self, v: str) -> None:
-        self.picked.emit(v)
-        self.close()
-
-
-def box(parent: QVBoxLayout) -> QVBoxLayout:
-    f = QFrame()
-    f.setObjectName("bx")
-    lo = QVBoxLayout(f)
-    lo.setContentsMargins(14, 12, 14, 12)
-    lo.setSpacing(10)
-    parent.addWidget(f)
-    return lo
+            b.clicked.connect(lambda _=False, v=text: self._sel(v))
+            self.buttons[text] = b
+            row, col = divmod(i, columns)
+            self.grid.addWidget(b, row, col)
+            
+    def set_value(self, val: str):
+        for k, b in self.buttons.items():
+            b.setChecked(k == val)
+            
+    def _sel(self, val: str):
+        self.set_value(val)
+        self.picked.emit(val)
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("easy-loader")
-        self.setFixedSize(440, 560)
-
+        self.setMinimumSize(440, 740)
+        self.setWindowIcon(QIcon(resource_path("icon.ico")))
+        
         self._worker: DownloadWorker | None = None
         self._iworker: InfoWorker | None = None
-        self._dtype = "audio"
+        self._dtype = "video"
         self._vq = "1080p"
-        self._aq = "192k"
+        self._aq = "192 kbps"
         self._thumb_path = ""
-        self._popup = QualityPopup(AUDIO_ITEMS)
-        self._popup.picked.connect(self._set_q)
-        self._acodec = "libmp3lame"
-        self._vcodec = "mp4"
-        self._codec_popup = QualityPopup(AUDIO_CODECS)
-        self._codec_popup.picked.connect(self._set_codec)
+        self._acodec = "MP3 (libmp3lame)"
+        self._vcodec = "MP4 (H.264)"
+        
+        self._url_timer = QTimer(self)
+        self._url_timer.setSingleShot(True)
+        self._url_timer.setInterval(500)
+        self._url_timer.timeout.connect(self._process_url)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.setCentralWidget(scroll)
 
         w = QWidget()
         w.setObjectName("c")
-        self.setCentralWidget(w)
+        scroll.setWidget(w)
+        
         r = QVBoxLayout(w)
-        r.setContentsMargins(20, 16, 20, 16)
-        r.setSpacing(8)
+        r.setContentsMargins(24, 24, 24, 24)
+        r.setSpacing(24)
 
+        # Header
+        header = QHBoxLayout()
+        title_lbl = QLabel("Easy Loader")
+        title_lbl.setObjectName("title")
+        header.addWidget(title_lbl)
+        header.addStretch()
+        r.addLayout(header)
+
+        # URL Input
         self._url = QLineEdit()
         self._url.setPlaceholderText("https://youtube.com/watch?v=…")
         self._url.textChanged.connect(self._on_url)
-        box(r).addWidget(self._url)
+        r.addWidget(self._url)
 
-        c2 = box(r)
+        # Formats
         row = QHBoxLayout()
-        row.setSpacing(6)
+        row.setSpacing(8)
         self._btns: dict[str, QPushButton] = {}
         for k, t in [("video", "Видео"), ("audio", "Аудио"), ("thumb", "Превью")]:
             b = QPushButton(t)
@@ -116,93 +168,124 @@ class MainWindow(QMainWindow):
             b.clicked.connect(lambda _=False, k2=k: self._tog(k2))
             self._btns[k] = b
             row.addWidget(b)
-        c2.addLayout(row)
+        r.addLayout(row)
 
-        c3 = box(r)
-        h = QHBoxLayout()
-        h.setSpacing(6)
-        self._q = QPushButton("192k")
-        self._q.setObjectName("q")
-        self._q.setCursor(Qt.PointingHandCursor)
-        self._q.clicked.connect(self._pop)
-        h.addWidget(self._q)
-
-        self._path = QLineEdit(str(Path.home() / "Downloads"))
-        self._path.setReadOnly(True)
-        h.addWidget(self._path)
-
-        self._br = QPushButton("Обзор")
-        self._br.setObjectName("br")
-        self._br.setCursor(Qt.PointingHandCursor)
-        self._br.clicked.connect(self._brws)
-        h.addWidget(self._br)
-        c3.addLayout(h)
-
-        self._codec_frame = QFrame()
-        self._codec_frame.setObjectName("bx")
-        cf_lo = QVBoxLayout(self._codec_frame)
-        cf_lo.setContentsMargins(14, 12, 14, 12)
-        cf_lo.setSpacing(10)
-        codec_row = QHBoxLayout()
-        codec_row.setSpacing(6)
-        self._codec_btn = QPushButton("MP3 (libmp3lame)")
-        self._codec_btn.setObjectName("q")
-        self._codec_btn.setCursor(Qt.PointingHandCursor)
-        self._codec_btn.clicked.connect(self._pop_codec)
-        codec_row.addWidget(self._codec_btn)
-
-        self._dl = QPushButton("Скачать")
-        self._dl.setObjectName("dl")
-        self._dl.setCursor(Qt.PointingHandCursor)
-        self._dl.clicked.connect(self._go)
-        codec_row.addWidget(self._dl)
-        cf_lo.addLayout(codec_row)
-        r.addWidget(self._codec_frame)
-
-        c4 = box(r)
-
-        self._bar = QProgressBar()
-        self._bar.setValue(0)
-        self._bar.setTextVisible(False)
-        c4.addWidget(self._bar)
-
-        self._st = QLabel("")
-        self._st.setObjectName("st")
-        c4.addWidget(self._st)
-
+        # Video Info Preview
         self._pv = QFrame()
         self._pv.setObjectName("bx")
-        pv_lo = QHBoxLayout(self._pv)
-        pv_lo.setContentsMargins(10, 8, 10, 8)
-        pv_lo.setSpacing(12)
-        self._th = QLabel()
-        self._th.setFixedSize(120, 68)
+        pv_lo = QVBoxLayout(self._pv)
+        pv_lo.setContentsMargins(0, 0, 0, 0)
+        pv_lo.setSpacing(0)
+        self._th = PreviewLabel()
         self._th.setObjectName("th")
         pv_lo.addWidget(self._th)
+        
         vi = QVBoxLayout()
-        vi.setSpacing(2)
+        vi.setContentsMargins(16, 16, 16, 16)
+        vi.setSpacing(8)
         self._tl = QLabel()
         self._tl.setObjectName("vt")
         self._tl.setWordWrap(True)
-        self._tl.setMaximumHeight(36)
         vi.addWidget(self._tl)
         self._ml = QLabel()
         self._ml.setObjectName("vm")
         vi.addWidget(self._ml)
-        vi.addStretch()
-        pv_lo.addLayout(vi, 1)
+        pv_lo.addLayout(vi)
+        r.addWidget(self._pv)
         self._pv.hide()
-        c4.addWidget(self._pv)
-        c4.addStretch()
 
-        self._tog("audio")
+        # Dynamic options container
+        self._opt_container = QWidget()
+        opt_lo = QVBoxLayout(self._opt_container)
+        opt_lo.setContentsMargins(0, 0, 0, 0)
+        opt_lo.setSpacing(24)
+        r.addWidget(self._opt_container)
+        
+        # Chip groups
+        self._vq_group = ChipGroup("КАЧЕСТВО", VIDEO_ITEMS)
+        self._vq_group.picked.connect(self._set_vq)
+        opt_lo.addWidget(self._vq_group)
+        
+        self._vc_group = ChipGroup("КОДЕК", VIDEO_CODECS)
+        self._vc_group.picked.connect(self._set_vc)
+        opt_lo.addWidget(self._vc_group)
+        
+        self._aq_group = ChipGroup("БИТРЕЙТ", AUDIO_ITEMS)
+        self._aq_group.picked.connect(self._set_aq)
+        opt_lo.addWidget(self._aq_group)
+        
+        self._ac_group = ChipGroup("КОДЕК", AUDIO_CODECS)
+        self._ac_group.picked.connect(self._set_ac)
+        opt_lo.addWidget(self._ac_group)
+        
+        # Audio ID3 Tags
+        self._id3_container = QWidget()
+        id3_lo = QVBoxLayout(self._id3_container)
+        id3_lo.setContentsMargins(0, 0, 0, 0)
+        id3_lo.setSpacing(8)
+        
+        id3_lbl = QLabel("ТЕГИ (ID3)")
+        id3_lbl.setObjectName("grouptitle")
+        id3_lo.addWidget(id3_lbl)
+        
+        self._id3_title = QLineEdit()
+        self._id3_title.setPlaceholderText("Название")
+        id3_lo.addWidget(self._id3_title)
+        
+        self._id3_author = QLineEdit()
+        self._id3_author.setPlaceholderText("Исполнитель")
+        id3_lo.addWidget(self._id3_author)
+        
+        opt_lo.addWidget(self._id3_container)
+        
+        # Path & Download
+        path_lo = QHBoxLayout()
+        self._path = QLineEdit(str(Path.home() / "Downloads"))
+        self._path.setReadOnly(True)
+        path_lo.addWidget(self._path)
+        self._br = QPushButton("📁")
+        self._br.setObjectName("br")
+        self._br.setCursor(Qt.PointingHandCursor)
+        self._br.clicked.connect(self._brws)
+        path_lo.addWidget(self._br)
+        r.addLayout(path_lo)
+
+        self._bar = QProgressBar()
+        self._bar.setValue(0)
+        self._bar.setTextVisible(False)
+        self._bar.hide()
+        r.addWidget(self._bar)
+
+        self._st = QLabel("")
+        self._st.setObjectName("st")
+        self._st.setAlignment(Qt.AlignCenter)
+        r.addWidget(self._st)
+
+        self._dl = QPushButton("СКАЧАТЬ В ГАЛЕРЕЮ")
+        self._dl.setObjectName("dl")
+        self._dl.setCursor(Qt.PointingHandCursor)
+        self._dl.clicked.connect(self._go)
+        r.addWidget(self._dl)
+
+        r.addStretch()
+
+        self._vq_group.set_value(self._vq)
+        self._vc_group.set_value(self._vcodec)
+        self._aq_group.set_value(self._aq)
+        self._ac_group.set_value(self._acodec)
+
+        self._tog("video")
 
     # ── video preview ───────────────────────────────────────
 
     def _on_url(self, text: str) -> None:
+        self._url_timer.start()
+
+    def _process_url(self) -> None:
+        text = self._url.text()
         if self._iworker and self._iworker.isRunning():
             self._iworker.terminate()
-            self._iworker.wait()
+            # Do not wait() here to avoid freezing the UI when deleting text
 
         m = YT_RE.search(text)
         if not m:
@@ -215,8 +298,7 @@ class MainWindow(QMainWindow):
 
         try:
             urlreq.urlretrieve(f"https://img.youtube.com/vi/{vid}/mqdefault.jpg", self._thumb_path)
-            p = QPixmap(self._thumb_path).scaled(120, 68, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self._th.setPixmap(p)
+            self._th.setPixmap(QPixmap(self._thumb_path))
         except Exception:
             self._th.setText("🎬")
 
@@ -235,68 +317,50 @@ class MainWindow(QMainWindow):
             if dur:
                 meta += f"  •  {dur}"
             self._ml.setText(meta)
+            
+            self._id3_title.setText(title)
+            self._id3_author.setText(channel)
+            
+            if _tp and os.path.exists(_tp):
+                self._th.setPixmap(QPixmap(_tp))
 
     # ── actions ─────────────────────────────────────────────
 
     def _tog(self, k: str) -> None:
         self._dtype = k
         for key, b in self._btns.items():
-            on = key == k
-            b.setChecked(on)
-            b.setStyleSheet('QPushButton#mo { background:#3b82f6; color:#fff; border-color:#3b82f6; }' if on else '')
+            b.setChecked(key == k)
 
         if k == "thumb":
-            self._codec_frame.setVisible(False)
-        else:
-            self._codec_frame.setVisible(True)
-            items = AUDIO_CODECS if k == "audio" else VIDEO_CODECS
-            self._codec_popup = QualityPopup(items)
-            self._codec_popup.picked.connect(self._set_codec)
-            self._codec_btn.setText(self._acodec if k == "audio" else self._vcodec)
+            self._vq_group.hide()
+            self._vc_group.hide()
+            self._aq_group.hide()
+            self._ac_group.hide()
+            self._id3_container.hide()
+        elif k == "video":
+            self._vq_group.show()
+            self._vc_group.show()
+            self._aq_group.hide()
+            self._ac_group.hide()
+            self._id3_container.hide()
+        elif k == "audio":
+            self._vq_group.hide()
+            self._vc_group.hide()
+            self._aq_group.show()
+            self._ac_group.show()
+            self._id3_container.show()
 
-        if k == "thumb":
-            self._q.setText("—")
-            self._q.setEnabled(False)
-        else:
-            self._q.setEnabled(True)
-            items = VIDEO_ITEMS if k == "video" else AUDIO_ITEMS
-            self._q.setText(self._vq if k == "video" else self._aq)
-            self._popup = QualityPopup(items)
-            self._popup.picked.connect(self._set_q)
+    def _set_vq(self, v: str) -> None:
+        self._vq = v
 
-    def _pop(self) -> None:
-        p = self._q.mapToGlobal(self._q.rect().bottomLeft())
-        p.setY(p.y() + 2)
-        self._popup.move(p)
-        self._popup.show()
-
-    def _set_q(self, v: str) -> None:
-        if self._dtype == "video":
-            self._vq = v
-        else:
-            self._aq = v
-        self._q.setText(v)
-
-    def _pop_codec(self) -> None:
-        p = self._codec_btn.mapToGlobal(self._codec_btn.rect().bottomLeft())
-        p.setY(p.y() + 2)
-        self._codec_popup.move(p)
-        self._codec_popup.show()
-
-    def _set_codec(self, v: str) -> None:
-        audio_map = {
-            "MP3 (libmp3lame)": "libmp3lame",
-            "AAC (aac)": "aac",
-            "OGG (libvorbis)": "libvorbis",
-            "FLAC (flac)": "flac",
-            "Opus (libopus)": "libopus",
-        }
-        if self._dtype == "video":
-            fmt_spec, ext = VIDEO_FORMATS.get(v, ("bestvideo+bestaudio/best", "mp4"))
-            self._vcodec = f"{fmt_spec}|{ext}"
-        else:
-            self._acodec = audio_map.get(v, "libmp3lame")
-        self._codec_btn.setText(v)
+    def _set_vc(self, v: str) -> None:
+        self._vcodec = v
+        
+    def _set_aq(self, v: str) -> None:
+        self._aq = v
+        
+    def _set_ac(self, v: str) -> None:
+        self._acodec = v
 
     def _brws(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Выбрать папку", self._path.text())
@@ -309,35 +373,54 @@ class MainWindow(QMainWindow):
         url = self._url.text().strip()
         if not YT_RE.search(url):
             self._st.setText("Неверная ссылка YouTube")
-            self._st.setStyleSheet("color:#ef4444; font-size:12px;")
+            self._st.setStyleSheet("color:#ef4444; font-size:14px;")
             return
         sd = self._path.text()
         if not os.path.isdir(sd):
             self._st.setText("Папка не найдена")
-            self._st.setStyleSheet("color:#ef4444; font-size:12px;")
+            self._st.setStyleSheet("color:#ef4444; font-size:14px;")
             return
 
-        q = self._vq if self._dtype == "video" else self._aq
         self._dl.setEnabled(False)
-        self._dl.setText("Загрузка…")
+        self._dl.setText("ЗАГРУЗКА…")
+        self._bar.show()
         self._bar.setValue(0)
         self._st.setText("Подготовка…")
-        self._st.setStyleSheet("color:#6a6a7e; font-size:12px;")
-
+        self._st.setStyleSheet("color:#8a8a9e; font-size:14px;")
+        
+        q = self._vq if self._dtype == "video" else self._aq
         vfmt = self._vcodec
-        if self._dtype == "video" and "|" in vfmt:
-            parts = vfmt.split("|", 1)
-            base_fmt = parts[0]
-            ext = parts[1]
-            qfmt = VIDEO_QUALITY_MAP.get(q, "bestvideo+bestaudio/best")
-            if "[height" in qfmt:
-                vfilter = base_fmt.replace("bestvideo", "", 1).replace("+bestaudio/best", "", 1)
-                combined = qfmt.replace("bestvideo", f"bestvideo{vfilter}", 1)
-            else:
-                combined = base_fmt
-            vfmt = f"{combined}|{ext}"
+        acodec_val = "libmp3lame"
+        
+        audio_map = {
+            "MP3 (libmp3lame)": "libmp3lame",
+            "AAC (aac)": "aac",
+            "OGG (libvorbis)": "libvorbis",
+            "FLAC (flac)": "flac",
+            "Opus (libopus)": "libopus",
+        }
+        
+        if self._dtype == "video":
+            fmt_spec, ext = VIDEO_FORMATS.get(vfmt, ("bestvideo+bestaudio/best", "mp4"))
+            vfmt = f"{fmt_spec}|{ext}"
+            if "|" in vfmt:
+                parts = vfmt.split("|", 1)
+                base_fmt = parts[0]
+                ext = parts[1]
+                qfmt = VIDEO_QUALITY_MAP.get(q, "bestvideo+bestaudio/best")
+                if "[height" in qfmt:
+                    vfilter = base_fmt.replace("bestvideo", "", 1).replace("+bestaudio/best", "", 1)
+                    combined = qfmt.replace("bestvideo", f"bestvideo{vfilter}", 1)
+                else:
+                    combined = base_fmt
+                vfmt = f"{combined}|{ext}"
+        else:
+            acodec_val = audio_map.get(self._acodec, "libmp3lame")
 
-        self._worker = DownloadWorker(url, sd, self._dtype, q, self._acodec, vfmt)
+        c_title = self._id3_title.text()
+        c_author = self._id3_author.text()
+
+        self._worker = DownloadWorker(url, sd, self._dtype, q, acodec_val, vfmt, c_title, c_author)
         self._worker.progress.connect(self._on_p)
         self._worker.finished.connect(self._on_f)
         self._worker.start()
@@ -346,13 +429,16 @@ class MainWindow(QMainWindow):
         self._st.setText(t)
         self._bar.setValue(int(pct))
 
-    def _on_f(self, msg: str, ok: bool) -> None:
+    def _on_f(self, msg: str, ok: bool, filepath: str = "") -> None:
         self._bar.setValue(100 if ok else 0)
+        QTimer.singleShot(1500, self._bar.hide)
         self._dl.setEnabled(True)
-        self._dl.setText("Скачать")
-        self._st.setText("")
-        self._st.setStyleSheet(f"color:{'#22c55e' if ok else '#ef4444'}; font-size:12px;")
-        self._st.setText(msg)
+        self._dl.setText("СКАЧАТЬ В ГАЛЕРЕЮ")
+        self._st.setStyleSheet(f"color:{'#10B981' if ok else '#ef4444'}; font-size:14px; font-weight:bold;")
+        if ok:
+            self._st.setText("Успешно сохранено!")
+        else:
+            self._st.setText(msg)
 
     def closeEvent(self, ev) -> None:
         if self._thumb_path and os.path.exists(self._thumb_path):
